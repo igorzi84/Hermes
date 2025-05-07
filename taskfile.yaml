@@ -1,0 +1,29 @@
+version: "3"
+
+tasks:
+  install_uv:
+    desc: "Install uv"
+    silent: true
+    cmds:
+      - |
+        if ! command -v uv >/dev/null 2>&1; then
+          echo "Installing uv..."
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+        else
+          echo "uv already installed."
+        fi
+  install_devenv:
+    cmds:
+      - task: install_uv
+      - $HOME/.local/bin/uv sync
+  build:
+    cmds:
+      - docker build -t hermes .
+  push:
+    cmds:
+      - docker push hermes
+  run:
+    cmds:
+      - docker run -it hermes {{.CLI_ARGS}}
