@@ -1,0 +1,81 @@
+version: 3
+
+tasks:
+  default:
+    cmds:
+      - task --list
+
+  install:
+    desc: Install dependencies using UV
+    cmds:
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - uv sync
+
+  clean:
+    desc: Clean up temporary files
+    cmds:
+      - rm -rf __pycache__
+      - rm -rf .pytest_cache
+      - rm -rf .coverage
+      - rm -rf htmlcov
+
+  test:
+    desc: Run tests
+    cmds:
+      - python -m pytest
+
+  lint:
+    desc: Run linters
+    cmds:
+      - python -m flake8
+      - python -m black . --check
+      - python -m isort . --check-only
+
+  docker:check:
+    desc: Check Docker environment
+    cmds:
+      - which docker
+      - which docker-compose
+      - docker --version
+      - docker-compose --version
+      - ls -la docker-compose.yml
+
+  docker:up:
+    desc: Start containers
+    dir: .
+    cmds:
+      - task docker:check
+      - DOCKER_BUILDKIT=1 docker-compose up --build
+
+  docker:up:detached:
+    desc: Start containers in detached mode
+    dir: .
+    cmds:
+      - task docker:check
+      - DOCKER_BUILDKIT=1 docker-compose up -d --build
+
+  docker:down:
+    desc: Stop containers
+    dir: .
+    cmds:
+      - task docker:check
+      - docker-compose down
+
+  docker:build:
+    desc: Build containers
+    dir: .
+    cmds:
+      - task docker:check
+      - DOCKER_BUILDKIT=1 docker-compose build
+
+  docker:logs:
+    desc: View container logs
+    dir: .
+    cmds:
+      - task docker:check
+      - docker-compose logs -f
+
+  run:
+    desc: Run the application
+    cmds:
+      - python hermes/main.py {{.CLI_ARGS}} 
