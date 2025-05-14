@@ -1,18 +1,29 @@
 FROM python:3.13-slim
 
-RUN apt-get update && apt-get install -y curl && apt-get clean
-
 WORKDIR /app
 
-RUN pip install go-task-bin
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY hermes/ /app/
-COPY taskfile.yaml pyproject.toml uv.lock /app/
+# Install Taskfile
+RUN sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
 
-RUN task install_devenv
+# Install UV with verification
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    test -f /root/.local/bin/uv && \
+    /root/.local/bin/uv --version
 
+# Copy project files
+COPY . .
+
+# Install Python dependencies using UV with lock file
+RUN /root/.local/bin/uv pip install --system .
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
 ENV PATH="/root/.local/bin:$PATH"
 
-ENTRYPOINT ["uv", "run", "main.py"]
-
-CMD ["breaking", "depricated"]
+# Default command
+CMD ["task", "run"]

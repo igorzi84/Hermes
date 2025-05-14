@@ -5,9 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "aiohttp>=3.11.18",
+    "asyncio>=3.4.3",
     "feedparser>=6.0.11",
     "openai>=1.76.2",
     "python-dotenv>=1.1.0",
+    "redis>=6.1.0",
 ]
 
 [dependency-groups]
