@@ -1,6 +1,6 @@
 # Hermes
 
-Hermes is a feed monitoring system that analyzes RSS/Atom feeds for important updates, particularly focusing on retirements, deprecations, and breaking changes in specified tech stacks. It uses AI to analyze entries and provides notifications through Slack.
+Hermes is a feed monitoring system that analyzes RSS/Atom feeds for important updates, particularly focusing on retirements, deprecations, and breaking changes in specified applications and APIs. It uses AI to analyze entries and provides notifications through Slack.
 
 ## Features
 
@@ -10,7 +10,7 @@ Hermes is a feed monitoring system that analyzes RSS/Atom feeds for important up
 - **PDF Reports**: Generates detailed PDF reports of analyzed entries, sorted by deadline
 - **Slack Integration**: Sends notifications to Slack with summaries and PDF reports
 - **Redis Storage**: Stores processed entries and their analysis in Redis
-- **Configurable Tech Stack**: Monitor specific tech stacks through environment variables
+- **Targeted Monitoring**: Focuses on breaking changes for specific applications and APIs
 - **Fast Dependency Management**: Uses UV for quick dependency installation
 - **Containerized**: Docker support for easy deployment
 - **Task Automation**: Taskfile for common development tasks
@@ -63,7 +63,7 @@ REDIS_PORT=6379
 REDIS_PASSWORD=your_redis_cloud_password
 DEFAULT_KEYWORDS=breaking,deprecation,change,update
 RSS_FEEDS=https://aws.amazon.com/blogs/aws/feed/,https://other-feed-url.com/feed/
-TECH_STACKS=Terraform,Boto3,API
+BREAKING_CHANGE_TARGETS=AWS Lambda,Python 3.12,Node.js 18
 SLACK_BOT_TOKEN=your-slack-bot-token
 SLACK_CHANNEL=your-channel-id
 ```
@@ -175,6 +175,19 @@ task run -- --list-feeds
 task run:report
 ```
 
+### Targeted Monitoring
+
+Configure which applications and APIs to monitor for breaking changes by setting the `BREAKING_CHANGE_TARGETS` environment variable:
+```bash
+export BREAKING_CHANGE_TARGETS="AWS Lambda,Python 3.12,Node.js 18,React 19,PostgreSQL 16"
+```
+
+The system will specifically look for:
+- Breaking changes in these applications/APIs
+- Deprecation notices
+- End-of-life announcements
+- Major version updates
+- Security-critical changes
 
 ## Output
 
