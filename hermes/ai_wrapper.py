@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class OpenAIWrapper:
     def __init__(self):
         self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+        self.model = os.getenv("OPENAI_MODEL", "gpt-4")
         self.rate_limit_delay = 0  # Current delay in seconds
         self.max_retries = 3  # Maximum number of retries for rate limit
 
@@ -85,7 +85,7 @@ class OpenAIWrapper:
 
                 # Get the analysis from OpenAI
                 response = await self.client.chat.completions.create(
-                    model="gpt-4",
+                    model=self.model,
                     messages=[
                         {"role": "system", "content": system_message},
                         {"role": "user", "content": user_message},
