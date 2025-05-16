@@ -11,6 +11,8 @@ dependencies = [
     "openai>=1.76.2",
     "python-dotenv>=1.1.0",
     "redis>=6.1.0",
+    "reportlab>=4.4.1",
+    "slack-sdk>=3.35.0",
 ]
 
 [dependency-groups]

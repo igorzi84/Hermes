@@ -1,24 +1,26 @@
 # Hermes
 
-Hermes is an intelligent RSS feed monitoring system that automatically detects and summarizes breaking changes and deprecations from various RSS feeds. It uses OpenAI's GPT-4 to analyze feed entries and provides concise summaries of important changes.
+Hermes is a feed monitoring system that analyzes RSS/Atom feeds for important updates, particularly focusing on retirements, deprecations, and breaking changes in specified tech stacks. It uses AI to analyze entries and provides notifications through Slack.
 
 ## Features
 
-- 🔍 Monitors multiple RSS feeds concurrently
-- 🤖 AI-powered analysis of feed entries
-- 📝 Automatic summarization of breaking changes and deprecations
-- 🔄 Deduplication of entries using content hashing
-- 💾 Persistent storage of processed entries in Redis
-- ⚡ Asynchronous processing for better performance
-- 🛠️ Task automation with Taskfile
-- 🐳 Docker support for easy deployment
-- 🚀 UV for fast dependency management
+- **Feed Monitoring**: Monitors multiple RSS/Atom feeds for updates
+- **AI Analysis**: Uses OpenAI's GPT-4 to analyze feed entries for important changes
+- **Deadline Tracking**: Identifies and tracks deadlines for important changes
+- **PDF Reports**: Generates detailed PDF reports of analyzed entries, sorted by deadline
+- **Slack Integration**: Sends notifications to Slack with summaries and PDF reports
+- **Redis Storage**: Stores processed entries and their analysis in Redis
+- **Configurable Tech Stack**: Monitor specific tech stacks through environment variables
+- **Fast Dependency Management**: Uses UV for quick dependency installation
+- **Containerized**: Docker support for easy deployment
+- **Task Automation**: Taskfile for common development tasks
 
 ## Prerequisites
 
 - Python 3.13 or higher
 - Redis Cloud account (recommended) or Redis server
 - OpenAI API key
+- Slack Bot Token (for notifications)
 - Taskfile (for automation)
 - Docker and Docker Compose (optional)
 
@@ -27,10 +29,10 @@ Hermes is an intelligent RSS feed monitoring system that automatically detects a
 ### Local Development
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/hermes.git
-   cd hermes
-   ```
+```bash
+git clone https://github.com/yourusername/hermes.git
+cd hermes
+```
 
 2. Install Taskfile:
 ```bash
@@ -62,6 +64,8 @@ REDIS_PASSWORD=your_redis_cloud_password
 DEFAULT_KEYWORDS=breaking,deprecation,change,update
 RSS_FEEDS=https://aws.amazon.com/blogs/aws/feed/,https://other-feed-url.com/feed/
 TECH_STACKS=Terraform,Boto3,API
+SLACK_BOT_TOKEN=your-slack-bot-token
+SLACK_CHANNEL=your-channel-id
 ```
 
 ### Docker Installation
@@ -146,6 +150,7 @@ task run:keywords     # Run with specific keywords
 task run:feeds        # Run with custom feeds
 task run:verbose      # Run with verbose logging
 task run:list-feeds   # List configured feeds
+task run:report       # Generate PDF report
 ```
 
 ### Command Line Examples
@@ -165,25 +170,34 @@ task run -- --verbose
 
 # List configured feeds
 task run -- --list-feeds
+
+# Generate PDF report
+task run:report
 ```
 
-## How It Works
 
-1. **Feed Monitoring**: The system concurrently fetches multiple RSS feeds for new entries.
+## Output
 
-2. **Content Analysis**: Each entry is analyzed using OpenAI's GPT-4 to identify:
-   - Breaking changes
-   - Deprecations
-   - Important updates
-   - Deadlines for changes
+### PDF Reports
 
-3. **Deduplication**: Entries are hashed and stored in Redis to prevent duplicate processing.
+Generated PDF reports include:
+- Title and generation timestamp
+- Table of entries sorted by deadline
+- Columns for Title, Published Date, Analysis, and Link
+- Entries without deadlines are listed at the end
 
-4. **Storage**: Processed entries are stored in Redis with:
-   - Original content
-   - AI-generated summary
-   - Metadata (title, link, publication date)
+### Slack Notifications
+
+Slack notifications include:
+- Summary of important entries
+- PDF report attachment
+- Links to original sources
+- Deadline information
+- Required actions
+
+## Development
+
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.

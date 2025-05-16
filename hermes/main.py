@@ -1,14 +1,12 @@
+import asyncio
 import argparse
-import hashlib
 import logging
 import os
-import sys
-
-import redis.asyncio as redis
 from dotenv import load_dotenv
-
-from ai_wrapper import OpenAIWrapper
-from feed_reader import FeedReader
+from feed_processor import FeedProcessor
+import redis.asyncio as redis
+from slack_notifier import SlackNotifier
+import sys
 
 # Load environment variables from .env file
 load_dotenv()
@@ -19,20 +17,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Redis client
-redis_client = redis.Redis(
-    host=os.getenv("REDIS_HOST"),
-    port=os.getenv("REDIS_PORT"),
-    password=os.getenv("REDIS_PASSWORD"),
-    decode_responses=True,
-)
-
 
 def parse_arguments():
     """Parse command line arguments."""
     # Get default keywords from .env
-    default_keywords = os.getenv("DEFAULT_KEYWORDS")
-    default_keywords = [kw.strip() for kw in default_keywords.split(",")]
+    default_keywords = os.getenv("DEFAULT_KEYWORDS", "")
+    default_keywords = (
+        [kw.strip() for kw in default_keywords.split(",")] if default_keywords else []
+    )
 
     parser = argparse.ArgumentParser(
         description="Search RSS feeds for specific keywords."
@@ -54,118 +46,80 @@ def parse_arguments():
         action="store_true",
         help="List the configured RSS feeds and exit",
     )
+    parser.add_argument(
+        "--generate-report",
+        action="store_true",
+        help="Generate a PDF report of all processed entries",
+    )
+    parser.add_argument(
+        "--report-filename",
+        help="Specify a custom filename for the PDF report",
+    )
 
     return parser.parse_args()
 
 
-async def get_entry_hash(entry) -> str:
-    """Generate a unique hash for a feed entry based on its content."""
-    # Create a string of relevant entry data
-    entry_data = f"{entry.title}{entry.link}{entry.published if hasattr(entry, 'published') else ''}"
-    return hashlib.sha256(entry_data.encode()).hexdigest()
-
-
-async def is_entry_processed(entry_hash: str) -> bool:
-    """Check if an entry has been processed before using Redis."""
-    return await redis_client.sismember("processed_entries", entry_hash)
-
-
-async def save_entry(entry_hash: str, entry, ai_summary: str):
-    """Save entry details to Redis."""
-    # Store entry details in a hash
-    entry_data = {
-        "title": entry.title,
-        "link": entry.link,
-        "published": entry.published if hasattr(entry, "published") else "",
-        "summary": entry.summary if hasattr(entry, "summary") else "",
-        "content": (
-            entry.content[0].value
-            if hasattr(entry, "content") and entry.content
-            else ""
-        ),
-        "hash": entry_hash,
-        "ai_summary": ai_summary,
-    }
-
-    # Save to Redis using hash
-    await redis_client.hset(f"entry:{entry_hash}", mapping=entry_data)
-
-    # Add to processed entries set
-    await redis_client.sadd("processed_entries", entry_hash)
-
-
-async def get_entry(entry_hash: str) -> dict:
-    """Retrieve entry details from Redis."""
-    return await redis_client.hgetall(f"entry:{entry_hash}")
-
-
-async def search_feed(feed_url: str, keywords: list[str]):
-    feed_reader = FeedReader(feed_url)
-    return await feed_reader.search_feed_for_keywords(keywords)
-
-
 async def main():
+    # Parse command line arguments
     args = parse_arguments()
-    ai_wrapper = OpenAIWrapper()
 
     # Set logging level based on verbose flag
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-        logger.debug("Verbose mode enabled")
 
-    # Get feed URLs from arguments or environment
-    if args.feeds:
-        feed_urls = [url.strip() for url in args.feeds.split(",")]
-        logger.info(f"Using {len(feed_urls)} feed URLs from command line")
-    else:
-        feed_urls_str = os.getenv("RSS_FEEDS")
-        if feed_urls_str:
-            feed_urls = [url.strip() for url in feed_urls_str.split(",")]
-            logger.info(f"Loaded {len(feed_urls)} feed URLs from .env file")
+    # Initialize Redis client
+    redis_client = redis.Redis(
+        host=os.getenv("REDIS_HOST", "localhost"),
+        port=int(os.getenv("REDIS_PORT", 6379)),
+        password=os.getenv("REDIS_PASSWORD"),
+        decode_responses=True,
+    )
+
+    # Initialize Slack notifier
+    slack_notifier = SlackNotifier()
+
+    # Initialize feed processor
+    feed_processor = FeedProcessor(
+        redis_client=redis_client, slack_notifier=slack_notifier, keywords=args.keywords
+    )
+
+    try:
+        if args.generate_report:
+            logger.info("Generating PDF report...")
+            report_path = await feed_processor.generate_report(args.report_filename)
+            if report_path:
+                logger.info(f"Report generated successfully: {report_path}")
+            else:
+                logger.warning("No entries found to generate report")
         else:
-            logger.warning("No RSS_FEEDS found in .env file, using defaults")
-            feed_urls = [
-                "https://aws.amazon.com/blogs/aws/feed/",
-            ]
-
-    # List feeds if requested
-    if args.list_feeds:
-        logger.info("Configured RSS feeds:")
-        for i, url in enumerate(feed_urls, 1):
-            logger.info(f"{i}. {url}")
-        sys.exit(0)
-
-    # Process each feed concurrently
-    tasks = [search_feed(feed_url, args.keywords) for feed_url in feed_urls]
-    results = await asyncio.gather(*tasks)
-
-    for feed_url, found_entries in zip(feed_urls, results):
-        if found_entries:
-            logger.info(f"Found {len(found_entries)} entries in {feed_url}")
-
-            for entry in found_entries:
-                entry_hash = await get_entry_hash(entry)
-
-                # Skip if we've already processed this entry
-                if await is_entry_processed(entry_hash):
-                    logger.debug(f"Skipping already processed entry: {entry.title}")
-                    continue
-
-                logger.info(f"Title: {entry.title}")
-                logger.info(f"Link: {entry.link}")
-                logger.info(
-                    f"Published: {entry.published if hasattr(entry, 'published') else 'N/A'}"
+            # Get feeds from command line or environment variable
+            feeds = (
+                args.feeds.split(",")
+                if args.feeds
+                else os.getenv("RSS_FEEDS", "").split(",")
+            )
+            if not feeds or not feeds[0]:
+                print(
+                    "No RSS feeds configured. Please set RSS_FEEDS environment variable or use --feeds option."
                 )
-                logger.info("-" * 40)
+                return
 
-                summary = ai_wrapper.summarize(entry)
-                logger.info(f"Summary: {summary}")
+            # List feeds if requested
+            if args.list_feeds:
+                print("\nConfigured RSS Feeds:")
+                for feed in feeds:
+                    print(f"- {feed}")
+                return
 
-                # Save entry to Redis
-                await save_entry(entry_hash, entry, summary)
+            # Process feeds
+            logger.info(
+                f"Processing {len(feeds)} feeds with the following keywords: {args.keywords}"
+            )
+            await feed_processor.process_feeds(feeds)
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    import asyncio
-
     asyncio.run(main())
