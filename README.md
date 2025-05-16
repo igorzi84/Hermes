@@ -2,6 +2,8 @@
 
 Hermes is a feed monitoring system that analyzes RSS/Atom feeds for important updates, particularly focusing on retirements, deprecations, and breaking changes in specified applications and APIs. It uses AI to analyze entries and provides notifications through Slack.
 
+![Hermes](https://github.com/igorzi84/Hermes/blob/main/feed_summary.jpg?raw=true)
+
 ## Features
 
 - **Feed Monitoring**: Monitors multiple RSS/Atom feeds for updates
