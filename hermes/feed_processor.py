@@ -37,9 +37,24 @@ class FeedProcessor:
     async def process_feeds(self, feed_urls: List[str]):
         """Process multiple feeds concurrently."""
         try:
+            logger.info(f"Starting to process {len(feed_urls)} feeds")
+
             # Process all feeds
-            tasks = [self.process_feed(url) for url in feed_urls]
-            await asyncio.gather(*tasks)
+            tasks = []
+            for url in feed_urls:
+                logger.info(f"Creating task for feed: {url}")
+                task = asyncio.create_task(self.process_feed(url))
+                tasks.append(task)
+
+            # Wait for all tasks to complete
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Check results for any errors
+            for url, result in zip(feed_urls, results):
+                if isinstance(result, Exception):
+                    logger.error(f"Error processing feed {url}: {str(result)}")
+                else:
+                    logger.info(f"Successfully processed feed: {url}")
 
             # After processing all feeds, send a summary notification if there are important entries
             if self.important_entries:
@@ -56,17 +71,27 @@ class FeedProcessor:
     async def process_feed(self, feed_url: str):
         """Process a single feed."""
         try:
+            logger.info(f"Fetching feed: {feed_url}")
             feed = feedparser.parse(feed_url)
-            logger.info(f"Processing feed {feed_url}")
+
             if feed.bozo:
                 logger.error(f"Error parsing feed {feed_url}: {feed.bozo_exception}")
                 return
 
+            logger.info(
+                f"Successfully parsed feed {feed_url}, found {len(feed.entries)} entries"
+            )
+
             for entry in feed.entries:
-                await self.process_entry(entry, feed_url)
+                try:
+                    await self.process_entry(entry, feed_url)
+                except Exception as e:
+                    logger.error(f"Error processing entry in feed {feed_url}: {str(e)}")
+                    continue  # Continue with next entry even if one fails
 
         except Exception as e:
             logger.error(f"Error processing feed {feed_url}: {str(e)}")
+            raise  # Re-raise to be caught by process_feeds
 
     def matches_keywords(self, entry) -> bool:
         """Check if an entry matches any of the configured keywords."""
@@ -124,7 +149,7 @@ class FeedProcessor:
                 logger.debug(f"Parsed analysis data: {analysis_data}")
 
                 # Save the entry to Redis with the analysis data
-                await self.save_entry(entry_hash, entry, analysis_data)
+                await self.save_entry(entry_hash, entry, analysis_data, feed_url)
 
                 # If the entry is important, add it to our collection for summary
                 if "not_important" not in str(analysis_data).lower():
@@ -134,6 +159,7 @@ class FeedProcessor:
                             "link": entry.get("link", ""),
                             "analysis": analysis_data,
                             "published": entry.get("published", ""),
+                            "feed_name": feed_url,  # Add feed name to the entry
                         }
                     )
                     logger.info(
@@ -142,7 +168,7 @@ class FeedProcessor:
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse analysis JSON: {str(e)}")
                 # Save the raw analysis string if parsing fails
-                await self.save_entry(entry_hash, entry, analysis)
+                await self.save_entry(entry_hash, entry, analysis, feed_url)
 
         except Exception as e:
             logger.error(f"Error processing entry: {str(e)}")
@@ -155,8 +181,54 @@ class FeedProcessor:
             return
 
         try:
+            # Filter out entries with empty analysis or invalid deadlines
+            valid_entries = []
+            for entry in self.important_entries:
+                try:
+                    analysis = entry.get("analysis", {})
+                    if isinstance(analysis, str):
+                        analysis = json.loads(analysis)
+
+                    # Skip entries with empty analysis
+                    if not analysis or analysis == {}:
+                        logger.debug(
+                            f"Skipping entry with empty analysis: {entry.get('title', '')}"
+                        )
+                        continue
+
+                    # Skip entries with no deadline or invalid deadline
+                    deadline = analysis.get("deadline", "No deadline")
+                    if deadline == "No deadline":
+                        logger.debug(
+                            f"Skipping entry with no deadline: {entry.get('title', '')}"
+                        )
+                        continue
+
+                    try:
+                        deadline_date = datetime.datetime.strptime(deadline, "%Y-%m-%d")
+                        # Skip entries with passed deadlines
+                        if deadline_date < datetime.datetime.now():
+                            logger.debug(
+                                f"Skipping entry with passed deadline: {entry.get('title', '')} - {deadline}"
+                            )
+                            continue
+                    except ValueError:
+                        logger.debug(
+                            f"Skipping entry with invalid deadline format: {entry.get('title', '')}"
+                        )
+                        continue
+
+                    valid_entries.append(entry)
+                except (json.JSONDecodeError, AttributeError) as e:
+                    logger.error(f"Error processing entry for summary: {str(e)}")
+                    continue
+
+            if not valid_entries:
+                logger.info("No valid entries to summarize after filtering")
+                return
+
             # Generate PDF report using the consolidated function
-            report_path = await self.generate_report(entries=self.important_entries)
+            report_path = await self.generate_report(entries=valid_entries)
             if not report_path:
                 logger.error("Failed to generate PDF report")
                 return
@@ -178,7 +250,7 @@ class FeedProcessor:
             # Count critical and non-critical events
             critical_count = 0
             non_critical_count = 0
-            for entry in self.important_entries:
+            for entry in valid_entries:
                 try:
                     analysis = entry.get("analysis", {})
                     if isinstance(analysis, str):
@@ -204,13 +276,13 @@ class FeedProcessor:
             # Create summary message
             summary = f"*Hermes Feed Analysis Report*\n\n"
             summary += f"*Event Summary:*\n"
-            summary += f"• Total Events: {len(self.important_entries)}\n"
+            summary += f"• Total Events: {len(valid_entries)}\n"
             summary += f"• Critical Events: {critical_count}\n"
             summary += f"• Non-Critical Events: {non_critical_count}\n\n"
             summary += f"*Important Updates:*\n"
 
             # Add each important entry
-            for entry in self.important_entries:
+            for entry in valid_entries:
                 try:
                     analysis = entry.get("analysis", {})
                     if isinstance(analysis, str):
@@ -228,14 +300,11 @@ class FeedProcessor:
 
                     summary += f"• *{entry['title']}* {'🚨' if is_critical else ''}\n"
                     summary += f"  Summary: {analysis.get('summary', 'No summary available')}\n"
-
-                    deadline = analysis.get("deadline", "No deadline")
-                    if deadline != "No deadline":
-                        summary += f"  Deadline: {deadline}\n"
-
-                    impact = analysis.get("impact", "")
-                    if impact:
-                        summary += f"  Impact: {impact}\n"
+                    summary += (
+                        f"  Deadline: {analysis.get('deadline', 'No deadline')}\n"
+                    )
+                    summary += f"  Impact: {analysis.get('impact', 'Unknown')}\n"
+                    summary += f"  Feed: {entry.get('feed_name', 'Unknown Feed')}\n"
 
                     actions = analysis.get("actions", [])
                     if actions:
@@ -281,7 +350,7 @@ class FeedProcessor:
             logger.error(f"Error checking if entry was processed: {str(e)}")
             return False  # If we can't check Redis, assume it's not processed
 
-    async def save_entry(self, entry_hash: str, entry, analysis: str):
+    async def save_entry(self, entry_hash: str, entry, analysis: str, feed_url: str):
         """Save entry details and analysis to Redis."""
         try:
             # Handle analysis data - it could be a string or already a dict
@@ -305,6 +374,7 @@ class FeedProcessor:
                 "summary": entry.get("summary", ""),
                 "content": entry.get("content", [{"value": ""}])[0].get("value", ""),
                 "hash": entry_hash,
+                "feed_name": feed_url,  # Add feed name to the entry data
                 "analysis": json.dumps(
                     analysis_data
                 ),  # Store the analysis data as JSON string
@@ -366,13 +436,50 @@ class FeedProcessor:
                                     logger.error(
                                         f"Unexpected analysis data type for entry {entry_hash}"
                                     )
-                                    entry_data["analysis"] = {}
+                                    continue  # Skip entries with invalid analysis data
                             except json.JSONDecodeError:
                                 logger.error(
                                     f"Failed to parse analysis JSON for entry {entry_hash}"
                                 )
-                                entry_data["analysis"] = {}
-                        entries.append(entry_data)
+                                continue  # Skip entries with invalid JSON
+
+                            # Skip entries with empty analysis
+                            if (
+                                not entry_data["analysis"]
+                                or entry_data["analysis"] == {}
+                            ):
+                                logger.debug(
+                                    f"Skipping entry {entry_hash} with empty analysis"
+                                )
+                                continue
+
+                            # Skip entries with no deadline or invalid deadline
+                            deadline = entry_data["analysis"].get(
+                                "deadline", "No deadline"
+                            )
+                            if deadline == "No deadline":
+                                logger.debug(
+                                    f"Skipping entry {entry_hash} with no deadline"
+                                )
+                                continue
+
+                            try:
+                                deadline_date = datetime.datetime.strptime(
+                                    deadline, "%Y-%m-%d"
+                                )
+                                # Skip entries with passed deadlines
+                                if deadline_date < datetime.datetime.now():
+                                    logger.debug(
+                                        f"Skipping entry {entry_hash} with passed deadline: {deadline}"
+                                    )
+                                    continue
+                            except ValueError:
+                                logger.debug(
+                                    f"Skipping entry {entry_hash} with invalid deadline format"
+                                )
+                                continue
+
+                            entries.append(entry_data)
 
             if not entries:
                 logger.warning("No entries found to generate report")

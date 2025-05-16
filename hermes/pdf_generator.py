@@ -140,6 +140,65 @@ class PDFGenerator:
         )
         elements.append(Spacer(1, 20))
 
+        # Add feed summary section
+        elements.append(Paragraph("Feed Summary", styles["Heading2"]))
+        elements.append(Spacer(1, 10))
+
+        # Count entries per feed
+        feed_counts = {}
+        for entry in entries:
+            feed_name = entry.get("feed_name", "Unknown Feed")
+            feed_counts[feed_name] = feed_counts.get(feed_name, 0) + 1
+
+        # Create feed summary table
+        feed_summary_data = [["Feed Name", "Number of Entries"]]
+        for feed_name, count in sorted(feed_counts.items()):
+            feed_summary_data.append([feed_name, str(count)])
+
+        # Calculate feed summary table widths
+        page_width = letter[0] - 100  # Account for margins
+        feed_summary_widths = [
+            page_width * 0.7,
+            page_width * 0.3,
+        ]  # 70% for name, 30% for count
+
+        # Create feed summary table
+        feed_summary_table = Table(
+            feed_summary_data, colWidths=feed_summary_widths, repeatRows=1
+        )
+        feed_summary_table.setStyle(
+            TableStyle(
+                [
+                    # Header styling
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2C3E50")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                    ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 12),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+                    ("TOPPADDING", (0, 0), (-1, 0), 12),
+                    # Body styling
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+                    ("TEXTCOLOR", (0, 1), (-1, -1), colors.black),
+                    ("ALIGN", (0, 1), (0, -1), "LEFT"),  # Left align feed names
+                    ("ALIGN", (1, 1), (1, -1), "CENTER"),  # Center align counts
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 1), (-1, -1), 10),
+                    ("TOPPADDING", (0, 1), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
+                    # Grid styling
+                    ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#BDC3C7")),
+                    ("LINEBELOW", (0, 0), (-1, 0), 2, colors.HexColor("#2C3E50")),
+                ]
+            )
+        )
+        elements.append(feed_summary_table)
+        elements.append(Spacer(1, 30))
+
+        # Add main entries section title
+        elements.append(Paragraph("Detailed Entries", styles["Heading2"]))
+        elements.append(Spacer(1, 10))
+
         # Create table data with headers
         table_data = [["Title", "Published", "Deadline", "Analysis", "Link"]]
 
