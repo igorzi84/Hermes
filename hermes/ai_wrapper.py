@@ -129,7 +129,7 @@ Rules:
                 except json.JSONDecodeError as e:
                     logger.error(f"Invalid JSON response from OpenAI: {str(e)}")
                     logger.error(f"Raw response: {analysis}")
-                    raise ValueError("Invalid JSON response from OpenAI")
+                    raise ValueError("Invalid JSON response from OpenAI") from e
 
                 return analysis
 
