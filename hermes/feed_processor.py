@@ -32,6 +32,7 @@ class FeedProcessor:
             for kw in os.getenv("DEFAULT_KEYWORDS", "").split(",")
             if kw.strip()
         ]
+        self.total_entries = 0
         logger.info(f"Initialized FeedProcessor with keywords: {self.keywords}")
 
     async def process_feeds(self, feed_urls: List[str]):
@@ -55,6 +56,9 @@ class FeedProcessor:
                     logger.error(f"Error processing feed {url}: {str(result)}")
                 else:
                     logger.info(f"Successfully processed feed: {url}")
+
+            # Log total number of entries
+            logger.info(f"Total entries processed from all feeds: {self.total_entries}")
 
             # After processing all feeds, send a summary notification if there are important entries
             if self.important_entries:
@@ -97,7 +101,7 @@ class FeedProcessor:
                     logger.info(
                         f"Found {len(feed.entries)} entries despite parsing issues"
                     )
-
+            self.total_entries += len(feed.entries)
             logger.info(
                 f"Successfully parsed feed {feed_url}, found {len(feed.entries)} entries"
             )
