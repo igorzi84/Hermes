@@ -75,14 +75,36 @@ class FeedProcessor:
             feed = feedparser.parse(feed_url)
 
             if feed.bozo:
-                logger.error(f"Error parsing feed {feed_url}: {feed.bozo_exception}")
-                return
+                # Log detailed parsing issues
+                if hasattr(feed, "bozo_exception"):
+                    error_msg = str(feed.bozo_exception)
+                    if "mismatched tag" in error_msg:
+                        logger.warning(
+                            f"Feed {feed_url} has XML tag mismatches, attempting to process entries anyway"
+                        )
+                    else:
+                        logger.warning(
+                            f"Feed parsing issues for {feed_url}: {error_msg}"
+                        )
+
+                # Check if we have any entries despite the parsing issues
+                if not feed.entries:
+                    logger.error(
+                        f"No entries found in feed {feed_url} due to parsing errors"
+                    )
+                    return
+                else:
+                    logger.info(
+                        f"Found {len(feed.entries)} entries despite parsing issues"
+                    )
 
             logger.info(
                 f"Successfully parsed feed {feed_url}, found {len(feed.entries)} entries"
             )
 
             for entry in feed.entries:
+                logger.debug(f"Processing entry: {entry.title}")
+                logger.debug(f"Entry: {entry}")
                 try:
                     await self.process_entry(entry, feed_url)
                 except Exception as e:
@@ -134,6 +156,7 @@ class FeedProcessor:
                 return
 
             # Analyze the entry using AI
+            logger.info(f"{feed_url} - Analyzing entry: {entry.get('title', '')}")
             analysis = await self.ai_wrapper.analyze_entry(entry)
 
             # Handle analysis data - it could be a string or already a dict
@@ -352,6 +375,7 @@ class FeedProcessor:
 
     async def save_entry(self, entry_hash: str, entry, analysis: str, feed_url: str):
         """Save entry details and analysis to Redis."""
+        # TODO: Add expiration to the entry
         try:
             # Handle analysis data - it could be a string or already a dict
             if isinstance(analysis, str):

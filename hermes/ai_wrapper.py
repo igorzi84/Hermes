@@ -11,10 +11,30 @@ logger = logging.getLogger(__name__)
 
 class OpenAIWrapper:
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY key is not set")
+        self.client = AsyncOpenAI(api_key=openai_api_key)
         self.model = os.getenv("OPENAI_MODEL", "gpt-4")
         self.rate_limit_delay = 0  # Current delay in seconds
         self.max_retries = 3  # Maximum number of retries for rate limit
+        self.max_content_length = (
+            4000  # Maximum length for content to avoid context window issues
+        )
+
+    def _truncate_content(self, content: str) -> str:
+        """Truncate content to fit within the model's context window."""
+        if len(content) > self.max_content_length:
+            logger.warning(
+                f"Content length {len(content)} exceeds maximum {self.max_content_length}, truncating..."
+            )
+            # Truncate to max length, but try to end at a sentence
+            truncated = content[: self.max_content_length]
+            last_period = truncated.rfind(".")
+            if last_period > 0:
+                truncated = truncated[: last_period + 1]
+            return truncated + "\n[Content truncated due to length]"
+        return content
 
     async def _handle_rate_limit(self, error_message: str) -> float:
         """Extract wait time from rate limit error and return delay in seconds."""
@@ -43,38 +63,43 @@ class OpenAIWrapper:
                     await asyncio.sleep(self.rate_limit_delay)
                     self.rate_limit_delay = 0  # Reset the delay
 
-                # Validate API key
-                if not os.getenv("OPENAI_API_KEY"):
-                    raise ValueError("OpenAI API key is not set")
-
                 # Prepare the entry content
                 content = f"Title: {entry.title}\n"
                 content += f"Link: {entry.link}\n"
                 content += f"Published: {entry.get('published', '')}\n"
-                content += f"Summary: {entry.get('summary', '')}\n"
+
+                # Get and truncate summary
+                summary = entry.get("summary", "")
+                content += f"Summary: {self._truncate_content(summary)}\n"
+
+                # Get and truncate content if available
                 if "content" in entry:
-                    content += f"Content: {entry.content[0].value}\n"
+                    content_value = entry.content[0].value
+                    content += f"Content: {self._truncate_content(content_value)}\n"
 
                 # Create the system message with explicit JSON structure
                 system_message = """You are a feed analyzer that provides structured analysis of feed entries. 
-                You should look for retirements, deprecations and breaking changes of the tech stack {breaking_change_targets} only
-                and have a deadline or a date that it will happen. If this entry is not related to the tech stack {breaking_change_targets}, you should return an empty JSON object.
-                Your response must be a valid JSON object with the following structure:
-                {{
-                    "summary": "Brief summary of the entry",
-                    "deadline": "YYYY-MM-DD" or "No deadline",
-                    "impact": "Assessment of impact",
-                    "actions": ["List", "of", "required", "actions"],
-                    "is_important": true/false
-                }}
-                
-                Rules:
-                1. Always include a deadline in YYYY-MM-DD format if one is mentioned
-                2. If no deadline is mentioned, then its not important
-                3. The deadline must be in the root of the JSON object
-                4. Always set is_important to true if the entry requires attention
-                5. Provide clear, actionable items in the actions array
-                6. Ensure the response is valid JSON""".format(
+You should only look for retirements, deprecations, and breaking changes that affect the tech stack {breaking_change_targets}.
+
+If the entry is NOT related to the tech stack {breaking_change_targets}, you MUST return an empty JSON object — even if there is a breaking change or deadline.
+
+If the entry IS related to the tech stack and includes a retirement, deprecation, or breaking change, then provide a response in the following JSON format:
+{{
+    "summary": "Brief summary of the entry",
+    "deadline": "YYYY-MM-DD" or "No deadline",
+    "impact": "Assessment of impact",
+    "actions": ["List", "of", "required", "actions"],
+    "is_important": true/false,
+    "reasoning": "Explain why you added this entry and not returned empty json"
+}}
+
+Rules:
+1. If no deadline is mentioned in the source, set "deadline" to "No deadline"
+2. If no deadline is mentioned, set "is_important" to false
+3. Do not return anything if the entry is unrelated to {breaking_change_targets}
+4. Ensure "is_important" is true only if the entry requires action and affects the stack
+5. Provide actionable steps in the actions array
+6. The response must be valid JSON""".format(
                     breaking_change_targets=os.environ.get(
                         "BREAKING_CHANGE_TARGETS", ""
                     )
@@ -101,9 +126,10 @@ class OpenAIWrapper:
                 # Validate the response is valid JSON
                 try:
                     json.loads(analysis)
-                except json.JSONDecodeError:
-                    logger.error("Invalid JSON response from OpenAI")
-                    raise ValueError("Invalid JSON response from OpenAI")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON response from OpenAI: {str(e)}")
+                    logger.error(f"Raw response: {analysis}")
+                    raise ValueError("Invalid JSON response from OpenAI") from e
 
                 return analysis
 
